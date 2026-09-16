@@ -1,6 +1,7 @@
 import { store } from './state.js';
 import { api } from './api.js';
 import { editor } from './editor.js';
+import { library } from './library.js';
 import { formatDuration, formatBytes } from './state.js';
 
 const build = {
@@ -48,18 +49,21 @@ const build = {
       return;
     }
 
-    const { token, selectedBoard, selectedFramework } = store.getState();
+    const { token, selectedBoard, selectedFramework, selectedLibDeps } = store.getState();
     if (!token) {
       alert('Not connected to Local Agent');
       return;
     }
+
+    const finalDetected = library.detectIncludes(code);
+    store.set({ detectedLibraries: finalDetected });
 
     this.resetUI();
     this.showBuilding();
     store.set({ appState: store.AppState.BUILDING, lastError: null });
 
     try {
-      const response = await api.build(code, [], selectedBoard, selectedFramework);
+      const response = await api.build(code, selectedLibDeps, selectedBoard, selectedFramework);
       const buildId = response.build_id;
       store.set({ currentBuildId: buildId, buildStartTime: Date.now() });
       this.startPolling(buildId, token);

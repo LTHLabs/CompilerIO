@@ -41,6 +41,11 @@
           placeholder="// Write your Arduino code here&#10;#include <Arduino.h>&#10;&#10;void setup() {&#10;  pinMode(2, OUTPUT);&#10;}&#10;&#10;void loop() {&#10;  digitalWrite(2, HIGH);&#10;  delay(1000);&#10;  digitalWrite(2, LOW);&#10;  delay(1000);&#10;}"
         ></textarea>
       </div>
+
+      <section class="library-panel" id="libraryPanel" hidden>
+        <h3>Detected Libraries</h3>
+        <div id="libraryList"></div>
+      </section>
     </section>
 
     <section class="build-section" id="buildSection" hidden>

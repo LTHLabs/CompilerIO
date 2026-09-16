@@ -21,7 +21,9 @@ const initialState = {
   buildStartTime: null,
   buildDuration: null,
   lastError: null,
-  logContent: ''
+  logContent: '',
+  detectedLibraries: [],
+  selectedLibDeps: [],
 };
 
 const listeners = new Set();

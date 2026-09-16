@@ -417,6 +417,114 @@ html, body {
   margin-top: 8px;
 }
 
+.library-panel {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.library-panel h3 {
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  margin-bottom: 12px;
+}
+
+.library-group {
+  margin-bottom: 16px;
+}
+
+.library-group:last-child {
+  margin-bottom: 0;
+}
+
+.library-group-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  margin-bottom: 8px;
+}
+
+.library-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.library-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+
+.library-item.library-selected {
+  border: 1px solid var(--accent);
+}
+
+.library-name {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  color: var(--fg);
+  flex: 1;
+  min-width: 120px;
+}
+
+.library-badge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.badge-core {
+  background: rgba(78, 201, 176, 0.2);
+  color: var(--success);
+}
+
+.badge-local {
+  background: rgba(220, 220, 170, 0.2);
+  color: var(--warning);
+}
+
+.badge-external {
+  background: rgba(0, 122, 204, 0.2);
+  color: var(--accent);
+}
+
+.badge-unknown {
+  background: rgba(244, 71, 71, 0.2);
+  color: var(--error);
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  height: 28px;
+}
+
+@media (max-width: 600px) {
+  .library-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .library-badge {
+    align-self: flex-start;
+  }
+  .btn-small {
+    width: 100%;
+  }
+}
+
 @media (max-width: 600px) {
   .header { padding: 10px 12px; }
   .header h1 { font-size: 1rem; }

@@ -6,9 +6,13 @@ import { prepare } from './prepare.js';
 import { build } from './build.js';
 import { logger } from './logger.js';
 import { wokwi } from './wokwi.js';
+import { library } from './library.js';
 
 async function init() {
-  editor.init();
+  editor.init((code) => {
+    const detected = library.detectIncludes(code);
+    store.set({ detectedLibraries: detected });
+  });
   pairing.init();
   prepare.init();
   build.init();
@@ -81,6 +85,7 @@ function render() {
   updateHeader(state);
   updateEditorSection(state);
   updateBuildSection(state);
+  updateLibraryPanel(state);
   updateModals(state);
 }
 
@@ -150,6 +155,25 @@ function updateBuildSection(state) {
   section.hidden = state.appState === AppState.DISCONNECTED ||
                    state.appState === AppState.PAIRING_REQUIRED ||
                    state.appState === AppState.PREPARING;
+}
+
+function updateLibraryPanel(state) {
+  library.renderLibraryPanel(
+    state.detectedLibraries,
+    state.selectedLibDeps,
+    (header, platformioName) => {
+      if (!state.selectedLibDeps.some(s => s.header === header)) {
+        store.set({
+          selectedLibDeps: [...state.selectedLibDeps, { header, platformioName }]
+        });
+      }
+    },
+    (header) => {
+      store.set({
+        selectedLibDeps: state.selectedLibDeps.filter(s => s.header !== header)
+      });
+    }
+  );
 }
 
 function updateModals(state) {

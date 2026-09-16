@@ -1,16 +1,29 @@
 const editor = {
   textarea: null,
   lineNumbers: null,
+  onChangeCallback: null,
+  changeDebounceTimer: null,
 
-  init() {
+  init(onChange) {
     this.textarea = document.getElementById('codeEditor');
     this.lineNumbers = document.getElementById('lineNumbers');
+    this.onChangeCallback = onChange;
 
-    this.textarea.addEventListener('input', () => this.updateLineNumbers());
+    this.textarea.addEventListener('input', () => this.handleInput());
     this.textarea.addEventListener('scroll', () => this.syncScroll());
     this.textarea.addEventListener('keydown', (e) => this.handleTab(e));
 
     this.updateLineNumbers();
+  },
+
+  handleInput() {
+    this.updateLineNumbers();
+    if (this.onChangeCallback) {
+      clearTimeout(this.changeDebounceTimer);
+      this.changeDebounceTimer = setTimeout(() => {
+        this.onChangeCallback(this.textarea.value);
+      }, 300);
+    }
   },
 
   updateLineNumbers() {
