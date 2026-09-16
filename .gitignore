@@ -1,0 +1,214 @@
+# ============================================================
+# CompilerIO — Git Ignore
+# ============================================================
+
+
+# ============================================================
+# KILO / AI AGENT
+# ============================================================
+
+.kilo/
+.kilocode/
+.opencode/
+
+# AI-agent temporary / local state
+**/.kilo/
+**/.kilocode/
+**/.opencode/
+
+
+# ============================================================
+# LOCAL AGENT — VIRTUAL ENVIRONMENT & LOCAL LOGS
+# ============================================================
+
+local-agent/venv/
+local-agent/.venv/
+
+# Local Agent logs
+local-agent/**/*.log
+
+# Python bytecode/cache
+local-agent/**/__pycache__/
+local-agent/**/*.py[cod]
+
+
+# ============================================================
+# COMPILERIO RUNTIME
+# ============================================================
+
+# Runtime-generated state
+runtime/
+
+# Runtime projects/build directories
+runtime/projects/
+
+# Runtime PlatformIO data
+runtime/platformio-data/
+
+# Runtime Agent state
+runtime/agent-state/
+
+
+# ============================================================
+# PLATFORMIO
+# ============================================================
+
+# PlatformIO build output
+.pio/
+
+**/.pio/
+
+# PlatformIO local package/core data
+platformio-data/
+
+# PlatformIO generated files
+.pioenvs/
+.piolibdeps/
+
+# PlatformIO IDE metadata
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+
+
+# ============================================================
+# BUILD / COMPILER ARTIFACTS
+# ============================================================
+
+# Firmware binaries
+*.bin
+*.hex
+*.uf2
+*.elf
+*.eep
+
+# Object / static library artifacts
+*.o
+*.a
+
+# Other common compiler output
+*.obj
+*.lib
+
+
+# ============================================================
+# PYTHON
+# ============================================================
+
+__pycache__/
+**/__pycache__/
+
+*.py[cod]
+*$py.class
+
+*.egg-info/
+**/*.egg-info/
+
+.venv/
+venv/
+
+# Python test/cache tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+
+# ============================================================
+# NODE / JAVASCRIPT
+# ============================================================
+
+node_modules/
+**/node_modules/
+
+dist/
+**/dist/
+
+# Generic build output
+build/
+**/build/
+
+# npm/yarn/pnpm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Generic logs
+*.log
+
+
+# ============================================================
+# TEMPORARY / CACHE FILES
+# ============================================================
+
+*.tmp
+*.temp
+*.cache
+
+*.bak
+*.backup
+*.old
+
+*.swp
+*.swo
+*~
+
+.DS_Store
+
+
+# ============================================================
+# OS
+# ============================================================
+
+Thumbs.db
+desktop.ini
+
+
+# ============================================================
+# IDE / EDITOR
+# ============================================================
+
+.idea/
+
+# VS Code workspace files
+*.code-workspace
+
+# Keep project-level VS Code settings only if intentionally tracked.
+# Do NOT ignore the entire .vscode/ directory because some projects
+# may contain useful configuration.
+.vscode/*.log
+.vscode/.ropeproject/
+
+
+# ============================================================
+# LOCAL ENVIRONMENT / SECRETS
+# ============================================================
+
+# Local environment variables
+.env
+.env.*
+!.env.example
+
+# Local credentials / secrets
+*.pem
+*.key
+
+# SQLite / local databases if created during development
+*.sqlite
+*.sqlite3
+*.db
+
+
+# ============================================================
+# TEMPORARY TEST OUTPUT
+# ============================================================
+
+# Temporary test directories
+tmp/
+temp/
+
+# Local test artifacts
+test-output/
+test-results/

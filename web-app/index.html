@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src http://127.0.0.1:8765 http://localhost:8765;">
+  <title>Local ESP32 Compiler</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="header">
+    <h1>Local ESP32 Compiler</h1>
+    <div class="agent-status" id="agentStatus">
+      <span class="status-indicator" id="statusIndicator"></span>
+      <span class="status-text" id="statusText">Checking Local Agent...</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="editor-section" id="editorSection" hidden>
+      <div class="editor-toolbar">
+        <label for="boardSelect">Board</label>
+        <select id="boardSelect" disabled>
+          <option value="esp32dev">ESP32 DevKit V1</option>
+        </select>
+
+        <label for="frameworkSelect">Framework</label>
+        <select id="frameworkSelect" disabled>
+          <option value="arduino">Arduino</option>
+        </select>
+
+        <button id="compileBtn" class="btn btn-primary" disabled>Compile</button>
+      </div>
+
+      <div class="editor-wrapper">
+        <div class="line-numbers" id="lineNumbers" aria-hidden="true"></div>
+        <textarea
+          id="codeEditor"
+          class="code-editor"
+          spellcheck="false"
+          placeholder="// Write your Arduino code here&#10;#include <Arduino.h>&#10;&#10;void setup() {&#10;  pinMode(2, OUTPUT);&#10;}&#10;&#10;void loop() {&#10;  digitalWrite(2, HIGH);&#10;  delay(1000);&#10;  digitalWrite(2, LOW);&#10;  delay(1000);&#10;}"
+        ></textarea>
+      </div>
+    </section>
+
+    <section class="build-section" id="buildSection" hidden>
+      <div class="build-status" id="buildStatus">
+        <div class="build-spinner" id="buildSpinner" hidden></div>
+        <div class="build-info" id="buildInfo"></div>
+        <div class="build-timer" id="buildTimer" hidden>00:00</div>
+      </div>
+
+      <div class="build-result" id="buildResult" hidden>
+        <div class="result-header">
+          <span class="result-icon" id="resultIcon"></span>
+          <h2 id="resultTitle"></h2>
+        </div>
+        <div class="result-details" id="resultDetails"></div>
+        <div class="result-actions" id="resultActions"></div>
+      </div>
+    </section>
+
+    <section class="log-section" id="logSection" hidden>
+      <div class="log-header">
+        <h3>Compiler Log</h3>
+        <button id="closeLogBtn" class="btn btn-secondary">Close</button>
+      </div>
+      <pre class="log-content" id="logContent"></pre>
+    </section>
+  </main>
+
+  <dialog id="pairingModal" class="modal">
+    <form method="dialog">
+      <h2>Connect to Local Agent</h2>
+      <p>The Local Agent is running on your computer. Enter the pairing code shown in the agent terminal to continue.</p>
+      <div class="form-group">
+        <label for="pairingCode">Pairing Code</label>
+        <input type="text" id="pairingCode" name="pairingCode" maxlength="32" placeholder="e.g. abc123" required autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label for="agentUrl">Agent URL</label>
+        <input type="url" id="agentUrl" name="agentUrl" value="http://127.0.0.1:8765" readonly>
+      </div>
+      <div class="pairing-hint">
+        <strong>Tip:</strong> The pairing code is printed in the terminal where you started the Local Agent. It is valid for 5 minutes.
+      </div>
+      <div class="modal-actions">
+        <button type="submit" id="pairSubmitBtn" class="btn btn-primary">Connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="prepareModal" class="modal">
+    <form method="dialog">
+      <h2>Prepare Environment</h2>
+      <p id="prepareMessage">The ESP32 build environment needs to be prepared. This may take a few minutes on first run.</p>
+      <div class="prepare-spinner" id="prepareSpinner" hidden></div>
+      <div class="prepare-status" id="prepareStatus" hidden></div>
+      <div class="modal-actions">
+        <button type="button" id="prepareBtn" class="btn btn-primary">Prepare Now</button>
+        <button type="button" id="closePrepareBtn" class="btn btn-secondary" hidden>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
