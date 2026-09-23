@@ -15,6 +15,7 @@ class Settings:
     allowed_origins: frozenset[str]
     pairing_ttl_seconds: int = 300
     build_retention: int = 20
+    dependency_prepare_timeout: int = 180
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -31,6 +32,10 @@ class Settings:
             build_retention = int(os.environ.get("COMPILERIO_BUILD_RETENTION", "20"))
         except ValueError:
             build_retention = 20
+        try:
+            dependency_prepare_timeout = int(os.environ.get("COMPILERIO_DEPENDENCY_PREPARE_TIMEOUT", "180"))
+        except ValueError:
+            dependency_prepare_timeout = 180
         return cls(
             workspace_root=workspace_root,
             base_environment=(workspace_root / "runtime" / "platformio-data").resolve(),
@@ -41,4 +46,5 @@ class Settings:
             python_executable=workspace_root / "local-agent" / "venv" / "bin" / "python",
             allowed_origins=allowed_origins,
             build_retention=max(1, build_retention),
+            dependency_prepare_timeout=max(1, dependency_prepare_timeout),
         )

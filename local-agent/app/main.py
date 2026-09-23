@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import re
-import shutil
-import subprocess
+import signal
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -15,6 +13,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings
+from .dependency_validator import validate_lib_deps
 from .environment import EnvironmentManager
 from .lifecycle import BuildJanitor
 from .security import SessionManager
@@ -160,13 +159,44 @@ async def run_build(record: BuildRecord, source_code: str, lib_deps: list[str]) 
         record.status = "RUNNING"
         started = time.monotonic()
         setup_seconds: float | None = None
+        dependency_prepare_seconds: float | None = None
         platformio_seconds: float | None = None
         merge_seconds: float | None = None
 
         try:
+            is_valid, error = validate_lib_deps(lib_deps)
+            if not is_valid:
+                record.status = "FAILED"
+                record.error = f"Invalid lib_deps: {error}"
+                record.log += f"\n[CompilerIO] Dependency validation failed: {error}"
+                return
+
             t = time.monotonic()
             write_project(record.project_dir, source_code, lib_deps)
             setup_seconds = time.monotonic() - t
+
+            t = time.monotonic()
+            dep_result = await asyncio.to_thread(
+                environment.prepare_dependencies,
+                record.project_dir,
+                lib_deps,
+                settings.dependency_prepare_timeout,
+            )
+            dependency_prepare_seconds = time.monotonic() - t
+
+            record.log += (
+                f"\n[CompilerIO] Dependency preparation\n"
+                f"{dep_result.stdout}{dep_result.stderr}"
+            )
+
+            if dep_result.returncode != 0:
+                record.status = "FAILED"
+                if dep_result.returncode == -signal.SIGKILL:
+                    record.error = f"Dependency preparation timed out after {settings.dependency_prepare_timeout}s"
+                    record.log += f"\n[CompilerIO] Dependency preparation TIMEOUT (process group killed)"
+                else:
+                    record.error = "Dependency preparation failed."
+                return
 
             t = time.monotonic()
             result = await asyncio.to_thread(
@@ -175,7 +205,10 @@ async def run_build(record: BuildRecord, source_code: str, lib_deps: list[str]) 
             )
             platformio_seconds = time.monotonic() - t
 
-            record.log = result.stdout + result.stderr
+            record.log += (
+                f"\n[CompilerIO] Compilation\n"
+                f"{result.stdout}{result.stderr}"
+            )
             (record.project_dir / "platformio.log").write_text(
                 record.log,
                 encoding="utf-8",
@@ -207,9 +240,8 @@ async def run_build(record: BuildRecord, source_code: str, lib_deps: list[str]) 
             merge_seconds = time.monotonic() - t
 
             record.log += (
-                "\n"
-                + merge_result.stdout
-                + merge_result.stderr
+                f"\n[CompilerIO] Firmware merge\n"
+                f"{merge_result.stdout}{merge_result.stderr}"
             )
 
             if merge_result.returncode != 0:
@@ -230,6 +262,7 @@ async def run_build(record: BuildRecord, source_code: str, lib_deps: list[str]) 
             record.log += (
                 f"\n\n[CompilerIO timing]\n"
                 f"project_setup_seconds={_timing_value(setup_seconds)}\n"
+                f"dependency_prepare_seconds={_timing_value(dependency_prepare_seconds)}\n"
                 f"platformio_seconds={_timing_value(platformio_seconds)}\n"
                 f"merge_seconds={_timing_value(merge_seconds)}\n"
                 f"total_seconds={_timing_value(total_seconds)}\n"

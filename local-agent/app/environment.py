@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import signal
 import subprocess
 import threading
 import uuid
@@ -212,3 +213,71 @@ class EnvironmentManager:
             if package.is_dir():
                 (packages_target / package.name).mkdir(exist_ok=True)
         (platforms_target / "espressif32").mkdir(exist_ok=True)
+
+    def _run_dependency_preparation(self, project_dir: Path, lib_deps: list[str]) -> subprocess.Popen[bytes]:
+        """Spawn pio pkg install for each library with network access but Base Environment read-only."""
+        self._prepare_mount_targets()
+        # Build a shell script that installs each library
+        lib_install_commands = []
+        for dep in lib_deps:
+            lib_install_commands.append(
+                f'{str(self.settings.python_executable)} -m platformio pkg install -l "{dep}" -e esp32dev'
+            )
+        script = "; ".join(lib_install_commands)
+        command = [
+            "unshare", "--user", "--map-root-user", "--mount", "sh", "-ceu",
+            (
+                "base=\"$1\"; agent=\"$2\"; shift 2; "
+                "mount --bind \"$base\" \"$base\"; mount -o remount,bind,ro \"$base\"; "
+                "for source in \"$base/packages\"/*; do "
+                "target=\"$agent/packages/${source##*/}\"; "
+                "mount --bind \"$source\" \"$target\"; mount -o remount,bind,ro \"$target\"; "
+                "done; "
+                "mount --bind \"$base/platforms/espressif32\" \"$agent/platforms/espressif32\"; "
+                "mount -o remount,bind,ro \"$agent/platforms/espressif32\"; exec \"$@\""
+            ),
+            "readonly-base-net", str(self.settings.base_environment), str(self.settings.agent_core_dir), "sh", "-c", script,
+        ]
+        return subprocess.Popen(
+            command,
+            env=self.platformio_environment(),
+            cwd=project_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+
+    def prepare_dependencies(
+        self, project_dir: Path, lib_deps: list[str], timeout_seconds: int
+    ) -> subprocess.CompletedProcess[str]:
+        """Install project dependencies with network access and a hard timeout."""
+        before = self._assert_ready_manifest()
+        process = self._run_dependency_preparation(project_dir, lib_deps)
+        try:
+            stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_seconds)
+            returncode = process.returncode
+        except subprocess.TimeoutExpired:
+            try:
+                pgid = os.getpgid(process.pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            stdout_bytes = process.stdout.read() if process.stdout else b""
+            stderr_bytes = process.stderr.read() if process.stderr else b""
+            returncode = -signal.SIGKILL
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        if self._manifest() != before:
+            self._state = EnvironmentState.ERROR
+            self._reason = "Base Environment changed during dependency preparation."
+            raise RuntimeError(self._reason)
+        return subprocess.CompletedProcess(
+            args=process.args,
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
