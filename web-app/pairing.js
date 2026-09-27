@@ -63,3 +63,5 @@ const pairing = {
     this.submitBtn.textContent = 'Connect';
   }
 };
+
+export { pairing };

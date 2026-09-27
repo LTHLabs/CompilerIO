@@ -34,3 +34,5 @@ const logger = {
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => logger.init());
 }
+
+export { logger };

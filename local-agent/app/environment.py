@@ -214,16 +214,9 @@ class EnvironmentManager:
                 (packages_target / package.name).mkdir(exist_ok=True)
         (platforms_target / "espressif32").mkdir(exist_ok=True)
 
-    def _run_dependency_preparation(self, project_dir: Path, lib_deps: list[str]) -> subprocess.Popen[bytes]:
-        """Spawn pio pkg install for each library with network access but Base Environment read-only."""
+    def _run_dependency_preparation(self, project_dir: Path) -> subprocess.Popen[bytes]:
+        """Spawn pio pkg install reading lib_deps from platformio.ini with network access but Base Environment read-only."""
         self._prepare_mount_targets()
-        # Build a shell script that installs each library
-        lib_install_commands = []
-        for dep in lib_deps:
-            lib_install_commands.append(
-                f'{str(self.settings.python_executable)} -m platformio pkg install -l "{dep}" -e esp32dev'
-            )
-        script = "; ".join(lib_install_commands)
         command = [
             "unshare", "--user", "--map-root-user", "--mount", "sh", "-ceu",
             (
@@ -236,7 +229,10 @@ class EnvironmentManager:
                 "mount --bind \"$base/platforms/espressif32\" \"$agent/platforms/espressif32\"; "
                 "mount -o remount,bind,ro \"$agent/platforms/espressif32\"; exec \"$@\""
             ),
-            "readonly-base-net", str(self.settings.base_environment), str(self.settings.agent_core_dir), "sh", "-c", script,
+            "readonly-base-net", str(self.settings.base_environment), str(self.settings.agent_core_dir),
+            str(self.settings.python_executable), "-m", "platformio", "pkg", "install",
+            "--project-dir", str(project_dir),
+            "--environment", "esp32dev",
         ]
         return subprocess.Popen(
             command,
@@ -248,11 +244,11 @@ class EnvironmentManager:
         )
 
     def prepare_dependencies(
-        self, project_dir: Path, lib_deps: list[str], timeout_seconds: int
+        self, project_dir: Path, timeout_seconds: int
     ) -> subprocess.CompletedProcess[str]:
         """Install project dependencies with network access and a hard timeout."""
         before = self._assert_ready_manifest()
-        process = self._run_dependency_preparation(project_dir, lib_deps)
+        process = self._run_dependency_preparation(project_dir)
         try:
             stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_seconds)
             returncode = process.returncode

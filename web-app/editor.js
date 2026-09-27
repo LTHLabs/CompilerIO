@@ -69,3 +69,5 @@ const editor = {
     this.textarea.focus();
   }
 };
+
+export { editor };

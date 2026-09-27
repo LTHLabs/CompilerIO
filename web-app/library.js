@@ -53,7 +53,7 @@ const CORE_HEADERS = new Set([
 const EXTERNAL_LIBRARY_MAP = {
   'DHT.h': {
     name: 'DHT sensor library',
-    platformioName: 'DHT sensor library@1.4.4',
+    platformioName: 'adafruit/DHT sensor library@1.4.4',
   },
   'DHTesp.h': {
     name: 'DHTesp',
@@ -438,3 +438,5 @@ const library = {
   CORE_HEADERS,
   EXTERNAL_LIBRARY_MAP,
 };
+
+export { library };

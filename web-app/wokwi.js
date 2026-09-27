@@ -19,3 +19,5 @@ const wokwi = {
     `;
   }
 };
+
+export { wokwi };

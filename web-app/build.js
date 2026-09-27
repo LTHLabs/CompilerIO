@@ -63,7 +63,8 @@ const build = {
     store.set({ appState: store.AppState.BUILDING, lastError: null });
 
     try {
-      const response = await api.build(code, selectedLibDeps, selectedBoard, selectedFramework);
+      const libDeps = selectedLibDeps.map(dep => dep.platformioName);
+      const response = await api.build(code, libDeps, selectedBoard, selectedFramework);
       const buildId = response.build_id;
       store.set({ currentBuildId: buildId, buildStartTime: Date.now() });
       this.startPolling(buildId, token);
@@ -270,3 +271,5 @@ const build = {
     this.compileBtn.disabled = false;
   }
 };
+
+export { build };

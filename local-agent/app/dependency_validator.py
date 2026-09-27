@@ -20,8 +20,8 @@ PATH_PATTERNS = [
 ]
 
 REGISTRY_SPEC_PATTERN = re.compile(
-    r"^[a-zA-Z0-9_. -]+"
-    r"(?:/[a-zA-Z0-9_. -]+)?"
+    r"^[a-zA-Z0-9_.-]+"
+    r"/[a-zA-Z0-9_. -]+"
     r"(?:@[a-zA-Z0-9_.+-]+)?"
     r"$"
 )
@@ -45,6 +45,9 @@ def validate_lib_deps(lib_deps: list[str]) -> tuple[bool, str | None]:
         for pattern in PATH_PATTERNS:
             if pattern.match(dep_stripped):
                 return False, f"Local path dependency not allowed: {dep_stripped}"
+
+        if "/" not in dep_stripped:
+            return False, f"Owner-qualified Registry spec required (owner/name@version): {dep_stripped}"
 
         if not REGISTRY_SPEC_PATTERN.match(dep_stripped):
             return False, f"Invalid library specification format: {dep_stripped}"

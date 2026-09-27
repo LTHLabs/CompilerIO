@@ -179,7 +179,6 @@ async def run_build(record: BuildRecord, source_code: str, lib_deps: list[str]) 
             dep_result = await asyncio.to_thread(
                 environment.prepare_dependencies,
                 record.project_dir,
-                lib_deps,
                 settings.dependency_prepare_timeout,
             )
             dependency_prepare_seconds = time.monotonic() - t
