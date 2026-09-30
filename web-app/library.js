@@ -1,3 +1,5 @@
+import { LIBRARY_CATALOG } from './library-catalog.js';
+
 const CORE_HEADERS = new Set([
   'Arduino.h',
   'SPI.h',
@@ -49,89 +51,6 @@ const CORE_HEADERS = new Set([
   'rom/gpio.h',
   'rom/uart.h',
 ]);
-
-const EXTERNAL_LIBRARY_MAP = {
-  'DHT.h': {
-    name: 'DHT sensor library',
-    platformioName: 'adafruit/DHT sensor library@1.4.4',
-  },
-  'DHTesp.h': {
-    name: 'DHTesp',
-    platformioName: 'DHTesp@3.3.0',
-  },
-  'Adafruit_Sensor.h': {
-    name: 'Adafruit Unified Sensor',
-    platformioName: 'Adafruit Unified Sensor@1.1.9',
-  },
-  'Adafruit_BME280.h': {
-    name: 'Adafruit BME280 Library',
-    platformioName: 'Adafruit BME280 Library@2.2.4',
-  },
-  'Adafruit_SSD1306.h': {
-    name: 'Adafruit SSD1306',
-    platformioName: 'Adafruit SSD1306@2.5.7',
-  },
-  'ArduinoJson.h': {
-    name: 'ArduinoJson',
-    platformioName: 'ArduinoJson@7.2.1',
-  },
-  'PubSubClient.h': {
-    name: 'PubSubClient',
-    platformioName: 'PubSubClient@2.8.0',
-  },
-  'WebSocketsClient.h': {
-    name: 'WebSockets',
-    platformioName: 'WebSockets@2.4.1',
-  },
-  'ESPAsyncWebServer.h': {
-    name: 'ESPAsyncWebServer',
-    platformioName: 'ESPAsyncWebServer@1.2.3',
-  },
-  'AsyncTCP.h': {
-    name: 'AsyncTCP',
-    platformioName: 'AsyncTCP@1.1.1',
-  },
-  'OneWire.h': {
-    name: 'OneWire',
-    platformioName: 'OneWire@2.3.8',
-  },
-  'DallasTemperature.h': {
-    name: 'DallasTemperature',
-    platformioName: 'DallasTemperature@3.9.1',
-  },
-  'MQTT.h': {
-    name: 'MQTT',
-    platformioName: 'MQTT@1.0.0',
-  },
-  'HTTPClient.h': {
-    name: 'HTTPClient',
-    platformioName: 'HTTPClient@1.0.0',
-  },
-  'TimeLib.h': {
-    name: 'Time',
-    platformioName: 'Time@1.6.1',
-  },
-  'NTPClient.h': {
-    name: 'NTPClient',
-    platformioName: 'NTPClient@3.2.1',
-  },
-  'U8g2lib.h': {
-    name: 'U8g2',
-    platformioName: 'U8g2@2.35.17',
-  },
-  'TFT_eSPI.h': {
-    name: 'TFT_eSPI',
-    platformioName: 'TFT_eSPI@2.5.43',
-  },
-  'FastLED.h': {
-    name: 'FastLED',
-    platformioName: 'FastLED@3.6.0',
-  },
-  'Servo.h': {
-    name: 'ESP32Servo',
-    platformioName: 'ESP32Servo@1.1.0',
-  },
-};
 
 function detectIncludes(source) {
   const includes = [];
@@ -299,26 +218,31 @@ function classifyHeader(header, includeType) {
   if (CORE_HEADERS.has(header)) {
     return 'core';
   }
-  if (EXTERNAL_LIBRARY_MAP[header]) {
+  if (LIBRARY_CATALOG[header]) {
     return 'external';
   }
   return 'unknown';
 }
 
+// Resolve a detected header against the verified catalog only. A header not
+// in the catalog has no known Registry spec here — it must not be guessed.
+// `platformioName` is null for that case, and callers must not offer it for
+// selection (see renderLibraryPanel), so it can never reach selectedLibDeps
+// or the build payload.
 function resolveLibrary(header) {
-  const mapping = EXTERNAL_LIBRARY_MAP[header];
-  if (mapping) {
+  const entry = LIBRARY_CATALOG[header];
+  if (entry) {
     return {
       header,
-      name: mapping.name,
-      platformioName: mapping.platformioName,
+      name: entry.name,
+      platformioName: entry.platformioName,
       type: 'external',
     };
   }
   return {
     header,
     name: header,
-    platformioName: header,
+    platformioName: null,
     type: 'unknown',
   };
 }
@@ -382,8 +306,9 @@ function renderLibraryPanel(detectedLibraries, selectedLibDeps, onAdd, onRemove)
     for (const lib of externalLibs) {
       const resolved = resolveLibrary(lib.header);
       const isSelected = selectedLibDeps.some(s => s.header === lib.header);
-      const badgeClass = lib.type === 'external' ? 'badge-external' : 'badge-unknown';
-      const badgeText = lib.type === 'external' ? `📦 ${escapeHtml(resolved.name)}` : '⚠ Unknown library';
+      const isVerified = lib.type === 'external' && resolved.platformioName;
+      const badgeClass = isVerified ? 'badge-external' : 'badge-unknown';
+      const badgeText = isVerified ? `📦 ${escapeHtml(resolved.name)}` : '⚠ Not in verified catalog';
 
       if (isSelected) {
         html += `
@@ -393,12 +318,21 @@ function renderLibraryPanel(detectedLibraries, selectedLibDeps, onAdd, onRemove)
             <button class="btn btn-small btn-remove" data-header="${escapeHtml(lib.header)}" data-action="remove">Remove</button>
           </li>
         `;
-      } else {
+      } else if (isVerified) {
         html += `
           <li class="library-item">
             <span class="library-name">${escapeHtml(lib.header)}</span>
             <span class="library-badge ${badgeClass}">${badgeText}</span>
             <button class="btn btn-small btn-add" data-header="${escapeHtml(lib.header)}" data-platformio="${escapeHtml(resolved.platformioName)}" data-action="add">Add</button>
+          </li>
+        `;
+      } else {
+        // No verified Registry spec for this header: no Add button, so it
+        // can never enter selectedLibDeps or the /build payload.
+        html += `
+          <li class="library-item library-unverified">
+            <span class="library-name">${escapeHtml(lib.header)}</span>
+            <span class="library-badge ${badgeClass}">${badgeText}</span>
           </li>
         `;
       }
@@ -436,7 +370,7 @@ const library = {
   resolveLibrary,
   renderLibraryPanel,
   CORE_HEADERS,
-  EXTERNAL_LIBRARY_MAP,
+  LIBRARY_CATALOG,
 };
 
 export { library };

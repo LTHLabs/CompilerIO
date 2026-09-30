@@ -58,8 +58,12 @@ Web App state:  selectedLibDeps = [{ header, platformioName }, ...]      (object
 API payload:    { source_code, board, framework, lib_deps: ["owner/name@x.y.z", ...] }   (string[])
 Agent:          BuildRequest.lib_deps: list[str] → validate_lib_deps → platformio.ini
 ```
-`web-app/library.js` holds `EXTERNAL_LIBRARY_MAP` (header → Registry spec). Only the `DHT.h` entry is verified;
-see `docs/PROJECT_STATE.md` for the status of the other entries.
+`web-app/library-catalog.js` holds `LIBRARY_CATALOG` (header → `{name, platformioName, verifiedAt, verifiedBy}`),
+imported by `web-app/library.js`. An entry is added only after a build-verified run (Registry-only, owner-qualified,
+exact version, matching `dependency_validator.py`). A detected external header with no catalog entry is classified
+`unknown`: `resolveLibrary` returns `platformioName: null`, and `renderLibraryPanel` renders no Add button for it, so
+it cannot enter `selectedLibDeps` or the `/build` payload. Currently only `DHT.h` is in the catalog; see
+`docs/PROJECT_STATE.md` for the status of the rest.
 
 ## Web App
 Static ES modules loaded from `index.html` via `app.js` (`state.js` store and `AppState`, `api.js`, `editor.js`,
