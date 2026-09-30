@@ -6,7 +6,7 @@ Statements below are CODE VERIFIED unless marked otherwise; runtime evidence is 
 ## Flow
 ```
 Web App (static ES modules, browser)
-  → Local Agent (FastAPI, 127.0.0.1:8765)
+  → Local Agent (FastAPI, port 8765; Personal binds 127.0.0.1, Hub binds 0.0.0.0 — see Execution modes)
     → Project Environment  runtime/projects/<build_id>/
       → PlatformIO (uses the Base Environment, read-only)
         → esptool merge_bin → wokwi-firmware.bin
@@ -16,12 +16,35 @@ Web App (static ES modules, browser)
 ## Local Agent modules (`local-agent/app/`)
 | Module | Role |
 |---|---|
-| `main.py` | Routes, `BuildRequest`, build orchestration (`run_build`, `write_project`, `merge_firmware`) |
+| `main.py` | Routes, `BuildRequest`, build orchestration (`run_build`, `write_project`, `merge_firmware`), Personal loopback middleware, build ownership, queue admission |
 | `environment.py` | Base Environment validation, isolation wrappers, dependency preparation, PlatformIO execution |
 | `dependency_validator.py` | `lib_deps` validation (Registry-only) |
-| `security.py` | Origin allowlist, pairing code → session token |
+| `security.py` | Origin allowlist, one-time pairing codes → per-session token (`token → session_id`, in memory) |
 | `lifecycle.py` | Build retention (FIFO), startup sweep, validation-dir cleanup |
-| `config.py` | Settings from environment variables |
+| `config.py` | Settings from environment variables, execution mode, Hub startup guard |
+| `__main__.py` | Supported launcher (`python -m app`): binds the mode's address, `proxy_headers=False` |
+
+## Execution modes (M2.3)
+`COMPILERIO_MODE` selects the mode at startup; the bind address is derived from it and is not configurable.
+
+| | Personal (default) | Hub (explicit opt-in) |
+|---|---|---|
+| Launcher bind | `127.0.0.1:8765` | `0.0.0.0:8765` |
+| Accepted clients | loopback only — non-loopback requests get 403 from middleware, even if uvicorn is bound to 0.0.0.0 manually | any client whose `Origin` is in the explicit allowlist |
+| Startup requirement | none | refuses to start unless `LOCAL_AGENT_ALLOWED_ORIGINS` is set explicitly, contains a non-loopback origin and no wildcard |
+| Pairing | one one-time code per agent start (valid 300 s) | exactly one valid one-time code at a time; replaced after each successful pairing and when it expires unused |
+| `/environment/prepare` | the paired local client | host-only: loopback connection source required, else 403 (checked before `build_lock`) |
+
+Hub mode is intended for a **trusted LAN only**: traffic is plain HTTP.
+
+- **Sessions:** every successful pairing creates a distinct `session_id` and token (in memory; cleared on restart).
+- **Build ownership:** each `BuildRecord` stores the creating `session_id`; status/log/firmware for a build owned by
+  another session return the same `404 {"detail":"Build not found."}` as an unknown `build_id`.
+- **Queue:** the existing `asyncio.Lock` (`build_lock`) serializes builds and `/environment/prepare` (FIFO, one at a time).
+  `create_build` rejects with 429 once `COMPILERIO_MAX_QUEUED_BUILDS` (default 3) builds are `QUEUED`; the active build is not
+  counted. The limit and retention are global across sessions.
+- **Host detection:** loopback is judged from the TCP connection source. The launcher disables uvicorn proxy headers so it cannot be
+  spoofed with `X-Forwarded-For`.
 
 ## Base vs Project Environment
 - **Base Environment** (`runtime/platformio-data/`): shared, immutable compiler platform and packages (espressif32, framework, toolchain, esptool, scons).
@@ -70,8 +93,16 @@ Static ES modules loaded from `index.html` via `app.js` (`state.js` store and `A
 `library.js`, `pairing.js`, `prepare.js`, `build.js`, `logger.js`, `wokwi.js`). It talks only to the Local Agent.
 Allowed origins default to `http://localhost:3000` and `http://127.0.0.1:3000`.
 
+Agent address (`api.js`): default `http://<page hostname>:8765` (page at `localhost` → local agent; page loaded from the Hub
+host → that host's agent), falling back to `http://127.0.0.1:8765`. An agent URL stored at pairing time (`sessionStorage`
+`compilerio_agent_url`, from the `#agentUrl` field) takes precedence; that field is `readonly` in `index.html`.
+CSP `connect-src` is `http://127.0.0.1:8765 http://localhost:8765 http://*:8765` — any host, but only `http:` on port 8765.
+The agent port 8765 is assumed by both `api.js` and the CSP.
+
 ## Security
-Origin allowlist plus one-time pairing code → session token (`x-local-agent-token`). No cloud, database or accounts (see `AGENTS.md`).
+Origin allowlist plus one-time pairing code → per-session token (`x-local-agent-token`), with per-session build ownership
+(see Execution modes). No cloud, database, accounts or roles. Not implemented: TLS, token expiry, pairing rate limiting,
+mDNS/discovery, tunnelling, Internet exposure.
 
 ## Runtime layout (gitignored)
 ```

@@ -4,106 +4,84 @@ Update when a gate finishes: replace items, do not append history. Source code b
 Labels: **CODE** = read in source, **RUNTIME** = observed in a real run. No timing/benchmark figures here (see `AGENTS.md`).
 
 ## Snapshot
-- Date: 2026-09-30.
-- Branch `milestone-2-library-handling`. HEAD `573db35` (M2.1.2), parent `cf1b0d8` — confirmed via `git log`/`git rev-parse`.
-- Uncommitted, M2.2-scoped: new `web-app/library-catalog.js`; modified `web-app/library.js`, `docs/ARCHITECTURE.md`,
-  `docs/PROJECT_STATE.md`. Manual browser validation of this slice passed on 2026-09-28 (see VERIFIED).
-- Uncommitted, **unrelated to M2.2** (present in the working tree, not made by this milestone, not to be touched
-  or committed here): `AGENTS.md`, `CLAUDE.md`, and `Product Requirements Document (PRD).md` show as deleted from
-  their tracked root paths; byte-identical copies now exist at `docs/CLAUDE.md`, `docs/AGENTS.md`, and
-  `docs/Product Requirements Document (PRD).md` (the first two are invisible to `git status` because `.gitignore`
-  ignores the bare names `CLAUDE.md`/`AGENTS.md` at any depth; the PRD copy shows as `??`). `.gitignore` itself is
-  modified, and two `Eksperiment/profiling/*.md` files are deleted — both predate M2.2. None of this was changed by
-  this task; flagged here only for accuracy of "current HEAD/commit state."
-- Active milestone: **M2.2 Verified Library/Dependency Catalog** — DHT slice implemented, re-verified at runtime,
-  and manually validated in a real browser. The remaining 15 previously-guessed headers are not yet in the catalog
-  (see OPEN).
+- Date: 2026-09-30. Branch `milestone-2-library-handling`, HEAD `f45ad65`.
+- Commits: `573db35` M2.1.2 → `7cd3cc5` M2.2 (DHT catalog slice) → `f45ad65` housekeeping (moved `AGENTS.md` and the PRD into
+  `docs/`, removed root `CLAUDE.md`/`AGENTS.md` and two `Eksperiment/profiling` reports, `.gitignore` now ignores `CLAUDE.md`,
+  `AGENTS.md`, `.claude`, `.vscode/`). The previous snapshot said HEAD `573db35` because it was written before, and committed inside,
+  `7cd3cc5`.
+- `CLAUDE.md` (root) and `docs/AGENTS.md` exist but are ignored/untracked; `CLAUDE.md`'s reading order still points to the old root
+  paths of `AGENTS.md` and the PRD (now `docs/AGENTS.md`, `docs/Product Requirements Document (PRD).md`).
+- Uncommitted: **M2.3 Execution Mode Foundation** — `local-agent/app/{config,main,security}.py`, new `local-agent/app/__main__.py`,
+  `web-app/{api.js,index.html}`, docs (`local-agent/README.md`, `docs/ARCHITECTURE.md`, this file) and
+  `Eksperiment/validation/m2.3-validation-2026-09-30.md`. Awaiting commit approval.
+- Active milestone: M2.3 — all gates passed (see VERIFIED). Report: `Eksperiment/validation/m2.3-validation-2026-09-30.md`.
 
 ## VERIFIED
-- **M2.1.2 Gates 1–4 — RUNTIME:** dependency preparation + offline compile, timeout kill path, compile network
-  isolation, and a real Web App → Agent → DHT build. See `Eksperiment/validation/m2.1.2-validation-2026-09-27.md`.
-- **M2.2 DHT catalog slice — RUNTIME:** `web-app/library-catalog.js` (`LIBRARY_CATALOG`) replaces
-  `EXTERNAL_LIBRARY_MAP` as the mapping source in `library.js`. Re-ran the Gate-4 method end to end (fresh Chrome
-  profile, pair → prepare → detect → Add → Compile): `data-platformio="adafruit/DHT sensor library@1.4.4"`,
-  `/build` payload `lib_deps:["adafruit/DHT sensor library@1.4.4"]`, agent returned 200, build `SUCCEEDED`
-  ("Build Successful", firmware size 329.2 KB). See "Latest evidence" for the build id and artifact check.
-- **Unverified headers no longer guess a spec — RUNTIME:** `resolveLibrary` on a header absent from the catalog
-  (e.g. `Servo.h`) returns `platformioName: null` and is classified `unknown`; `renderLibraryPanel` renders no Add
-  button for it, so it cannot enter `selectedLibDeps` or the `/build` payload (confirmed by reading the rendered
-  branch logic and by the in-process `resolveLibrary`/`classifyHeader` checks; not re-driven through the browser
-  for a non-DHT header in this run).
-- **`HTTPClient.h` stays `core`, not `external` — RUNTIME (in-process check):** `classifyHeader('HTTPClient.h', 'system')`
-  returns `core`; the former duplicate/dead `EXTERNAL_LIBRARY_MAP` entry for it no longer exists (removed with the
-  rest of the guessed map).
-- **Base Environment integrity — RUNTIME:** ad-hoc fingerprint identical before and after this run
-  (`81655045…582c`, same value as every M2.1.2 gate).
-- **M2.2 manual UI validation — RUNTIME (real browser, 2026-09-28):** three cases exercised by hand against the
-  live Web App + Agent (not headless-driven):
-  - `Servo.h` (not in catalog) → badge "⚠ Not in verified catalog", no Add button. PASS.
-  - `HTTPClient.h` (core header) → listed only under "Core (Arduino ESP32)", no "External Libraries" group. PASS.
-  - `DHT.h` (catalog hit) → badge "📦 DHT sensor library", Add button with spec `adafruit/DHT sensor library@1.4.4`,
-    Add → Remove toggle works. PASS.
-  Screenshot evidence: `Hasil-compiler-DHT.png` (held by the user, not committed to the repo by this task).
+- **M2.1.2 — RUNTIME:** dependency preparation (network ON) + offline compile (network OFF), timeout kill path, Base read-only +
+  manifest checks. `Eksperiment/validation/m2.1.2-validation-2026-09-27.md`.
+- **M2.2 — RUNTIME:** verified library catalog, `DHT.h → adafruit/DHT sensor library@1.4.4`; unverified headers get no Add button;
+  `HTTPClient.h` stays core (automated + manual browser validation, 2026-09-28).
+- **M2.3 — RUNTIME** (details and build ids in the M2.3 report):
+  - G1 Personal default binds `127.0.0.1` only; non-loopback clients get 403 even if bound to `0.0.0.0` by hand.
+  - G2 Hub is explicit opt-in (`COMPILERIO_MODE=hub`), binds `0.0.0.0`, refuses to start without an explicit non-loopback,
+    non-wildcard origin allowlist.
+  - G5 global waiting limit (`COMPILERIO_MAX_QUEUED_BUILDS`, default 3): race-safe admission, excess → 429, no record/dir created.
+  - G6 `/environment/prepare` serialized with builds on the existing `build_lock` (FIFO).
+  - G3 multi-client one-time pairing with distinct sessions; used codes rejected; one valid Hub code at a time; live 300 s expiry
+    produced exactly one replacement.
+  - G4 build ownership: other sessions get the same 404 as an unknown build id for status/log/firmware.
+  - Hub `/environment/prepare` host-only (loopback source), 403 for remote clients before `build_lock`; not spoofable via
+    forwarded headers with the launcher.
+  - G7 real Web App ↔ Hub agent: host + two remote clients paired, built, polled and downloaded firmware; Personal localhost flow
+    and manual agent-URL override still work.
+- **Base Environment integrity — RUNTIME:** fingerprint `81655045…582c` unchanged through every M2.1.2/M2.2/M2.3 run.
 
 ## OPEN
-- **Remaining 15 headers** (`DHTesp.h`, `Adafruit_Sensor.h`, `Adafruit_BME280.h`, `Adafruit_SSD1306.h`,
-  `ArduinoJson.h`, `PubSubClient.h`, `WebSocketsClient.h`, `ESPAsyncWebServer.h`, `AsyncTCP.h`, `OneWire.h`,
-  `DallasTemperature.h`, `MQTT.h`, `HTTPClient.h`, `TimeLib.h`, `NTPClient.h`, `U8g2lib.h`, `TFT_eSPI.h`,
-  `FastLED.h`, `Servo.h`) are **not** in `library-catalog.js`. They now render as "Not in verified catalog" with no
-  Add button — a UX regression from "guessed and silently broken" to "explicitly unavailable," which is the
-  intended M2.2 behavior, but means none of these headers can be built via the picker until each is verified and
-  added using the same method as DHT (Gate-1-style: submit build → confirm `.pio/libdeps` → confirm compile →
-  confirm Base fingerprint unchanged).
-- **Web App post-pair/post-prepare state refresh** — still unfixed; this run again worked around it with two
-  `Page.reload` calls (see Do Not Repeat).
-- **Version ranges (`^`, `~`)** — still rejected by the validator; no policy decision.
-- **Dependency cache** (PRD §11: cross-build reuse of downloaded packages) — not implemented; out of scope for
-  M2.2, which only changed which specs are offered, not how/when they're installed or cached.
-- `logger.js` double-init (`DOMContentLoaded` handler + explicit `app.js` call) — still unchecked.
-- **Unix-socket reachability** from the compile namespace — still not probed.
-- **Three UI observations from manual validation (2026-09-28), non-blocking, not fixed by M2.2:**
-  1. A page refresh is still needed after pairing before the app reliably advances (same root cause as the
-     "Web App post-pair/post-prepare state refresh" item above).
-  2. The code editor remains interactable while the environment is "Preparing Environment..." — nothing stops a
-     user from typing or clicking Compile mid-prepare.
-  3. Editor spacing/padding and the initial connection-state synchronization need visual/UX polish.
-  None of these are library-catalog issues; they belong to a future Web App UX pass, not M2.2.
+- **Hub security limits (by design for M2.3, trusted LAN only):** plain HTTP (no TLS), tokens never expire until restart, no
+  pairing rate limit, "host" = any local process on the Hub machine, manual `uvicorn` with trusted forwarded headers bypasses the
+  loopback checks (launcher is safe). `/environment/status` is unauthenticated and shows the Base path.
+- **Shared queue/retention:** one session can fill the global waiting limit; one session's builds can evict another's.
+- **Per-request blocking:** each `POST /build` runs the synchronous Base-manifest check in the event loop (several seconds);
+  bursts delay all requests. Queue rejections are evaluated after this check.
+- **Web App:** CSP `connect-src` includes `http://*:8765` (any host, http, port 8765 only); port 8765 assumed by `api.js` and CSP;
+  `#agentUrl` is `readonly`, so manual override is not user-typable; unused `127.0.0.1` defaults remain in `pairing.js`/`state.js`.
+- **UX (pre-existing, unfixed):** reload needed after pairing and after prepare; editor usable during "Preparing Environment...";
+  spacing/connection-state polish. In Hub mode the host operator must use `http://localhost:3000` to prepare.
+- **Library catalog:** only `DHT.h` is verified. The other 19 headers from the removed guessed map are not in the catalog
+  (`HTTPClient.h` is now classified as core); each needs Gate-1-style verification before being added.
+- Version ranges (`^`, `~`) rejected by the validator — no policy decision. Dependency cache (PRD §11) not implemented.
+- `logger.js` double-init unchecked. Unix-socket reachability from the compile namespace not probed.
+- **Not implemented (deferred):** mDNS/discovery, tunnelling, TLS, mobile execution, UI redesign, parallel workers, per-client
+  retention, persistent accounts/roles, Internet exposure.
 
 ## BLOCKERS
-- None known for the next gate.
+- None for committing M2.3; commit requires explicit user approval.
 
-## ACTIVE FILES
-- `web-app/library-catalog.js` **(new)** — `LIBRARY_CATALOG`: header → `{name, platformioName, verifiedAt, verifiedBy}`.
-  DHT.h only.
-- `web-app/library.js` — imports `LIBRARY_CATALOG` instead of the old hard-coded `EXTERNAL_LIBRARY_MAP`;
-  `classifyHeader`/`resolveLibrary` source from it; `renderLibraryPanel` gates the Add button on a catalog hit
-  (`isVerified`) so an unmapped header gets a badge only, never a selectable action. Include-detection/parsing
-  logic (`detectIncludes`, `matchInclude`) untouched.
-- Not touched this run: `local-agent/*`, `web-app/build.js`, `web-app/{api,app,editor,logger,pairing,prepare,state,wokwi}.js`,
-  `security.py`, `lifecycle.py`, Base Environment.
+## ACTIVE FILES (M2.3)
+- `local-agent/app/config.py` — mode, port, `max_queued_builds`, Hub startup guard, `is_loopback_host`.
+- `local-agent/app/__main__.py` (new) — launcher; bind from mode; `proxy_headers=False`.
+- `local-agent/app/main.py` — Personal loopback middleware, prepare under `build_lock` + Hub host-only check, queue admission 429,
+  `BuildRecord.session_id`, ownership in `get_build`, Hub code-expiry task.
+- `local-agent/app/security.py` — `token → session_id`, locked one-time codes, Hub rotation.
+- `web-app/api.js` (derived agent URL), `web-app/index.html` (CSP).
+- Unchanged: `environment.py`, `lifecycle.py`, `dependency_validator.py`, `library.js`, `library-catalog.js`, `build.js`.
 
 ## LATEST EVIDENCE
-- M2.2 DHT re-verification build id `ec0dbf9022074fe88cb74f970ee01d28` (project dir may be evicted on restart).
-  `.pio/libdeps/esp32dev/`: `DHT sensor library/`, `Adafruit Unified Sensor/`, `integrity.dat`. Both `firmware.bin`
-  and `wokwi-firmware.bin` present under `.pio/build/esp32dev/`.
-- Ad-hoc Base fingerprint reference (unchanged since M2.1.2):
-  `find runtime/platformio-data -exec stat -c '%n %a %s %Y' {} + | sort | sha256sum` → `81655045e90ad7155aa3ae1d2f178229306cee719db8d92e3f813dd7494a582c`.
-- M2.1.2 evidence: `Eksperiment/validation/m2.1.2-validation-2026-09-27.md`.
+- `Eksperiment/validation/m2.3-validation-2026-09-30.md` (all M2.3 gates, build ids, expiry run).
+- Ad-hoc Base fingerprint: `find runtime/platformio-data -exec stat -c '%n %a %s %Y' {} + | sort | sha256sum` →
+  `81655045e90ad7155aa3ae1d2f178229306cee719db8d92e3f813dd7494a582c`.
 
 ## NEXT GATE (exactly one)
-**Verify and add one more catalog entry** using the same method as DHT (submit build with a candidate
-owner-qualified spec → confirm `.pio/libdeps/esp32dev/` contents → confirm offline compile succeeds → confirm Base
-fingerprint unchanged), then add it to `library-catalog.js` with `verifiedAt`/`verifiedBy`. Repeat per-header; this
-is intentionally not batched into one task.
+**Commit M2.3** after explicit user approval: stage only the M2.3 files listed in ACTIVE FILES plus `local-agent/README.md`,
+`docs/ARCHITECTURE.md`, `docs/PROJECT_STATE.md` and the M2.3 report. Do not include ignored or unrelated files.
 
 ## DO NOT REPEAT
-- M2.1.2 items (network boundary, ownerless-spec behavior, timeout kill path, compile network isolation, Web App
-  module-export fix) — all settled; see the M2.1.2 validation report, do not re-investigate.
-- DHT E2E proof — settled three times now (M2.1.2 Gate 4, M2.2 automated re-verification, M2.2 manual browser
-  validation); do not re-run to prove the DHT happy path again unless `library.js`/`library-catalog.js` changes.
-- Servo.h / HTTPClient.h gating (no Add button for unverified, core headers never show as external) — settled by
-  manual validation; do not re-verify unless `library.js`'s classify/resolve/render logic changes.
-- Headless Chrome caches ES modules: use a fresh `--user-data-dir` or disable cache.
-- Web App does not refresh state after pair or prepare: reload the page between those steps until this UX bug is fixed.
-- `pkill -f` / `pgrep -f` can match the current shell's own cmdline text (exit 144). Prefer killing by port
-  (`fuser -k <port>/tcp`) or by tracked PID files over pattern matching against cmdline.
+- M2.1.2/M2.2 investigations (network boundary, ownerless specs, timeout kill, compile isolation, module exports, DHT E2E,
+  catalog gating) — settled; see their reports.
+- M2.3 gates G1–G7 and the live 300 s expiry run — settled; re-run only if `config.py`, `main.py`, `security.py`, `__main__.py`,
+  `api.js` or the CSP change.
+- A build submitted while the environment is `PREPARING` gets 409 (pre-existing readiness check) — expected, not a queue bug.
+- Test hygiene: headless Chrome caches ES modules (use a fresh `--user-data-dir`); the Web App needs a reload after pair and
+  after prepare; `pkill -f`/`pgrep -f` can match the calling shell (kill by port with `fuser -k <port>/tcp` or by PID file);
+  a harness wait on the text "Error" matches expected "TypeError: Failed to fetch" CSP lines.
+- Remote vs host on one machine: requests to the LAN IP (`192.168.1.74`) are non-loopback; requests to `127.0.0.1` are the host.

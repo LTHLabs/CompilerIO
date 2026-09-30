@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import signal
 import time
 import uuid
@@ -9,10 +10,10 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .config import Settings
+from .config import HUB_MODE, PERSONAL_MODE, Settings, is_loopback_host
 from .dependency_validator import validate_lib_deps
 from .environment import EnvironmentManager
 from .lifecycle import BuildJanitor
@@ -40,6 +41,8 @@ class BuildRecord:
     log: str = ""
     error: str | None = None
     artifacts: dict[str, Path] = field(default_factory=dict)
+    # Session that created the build; internal only, never returned in responses.
+    session_id: str = ""
 
 
 settings = Settings.from_environment()
@@ -59,17 +62,45 @@ app.add_middleware(
 )
 
 
-def protected(request: Request) -> None:
+@app.middleware("http")
+async def enforce_personal_loopback(request: Request, call_next):
+    # Personal mode serves the local user only, however the server was launched
+    # (e.g. a manual `uvicorn --host 0.0.0.0`): reject every non-loopback client.
+    if settings.mode == PERSONAL_MODE:
+        client_host = request.client.host if request.client else None
+        if not is_loopback_host(client_host):
+            return JSONResponse(status_code=403, content={"detail": "Personal mode accepts loopback clients only."})
+    return await call_next(request)
+
+
+def protected(request: Request) -> str:
+    """Validate origin and token; return the caller's session_id."""
     sessions.validate_origin(request)
-    sessions.require_token(request)
+    return sessions.require_token(request)
+
+
+async def rotate_expired_pairing_codes() -> None:
+    # Hub only: keep exactly one valid pairing code available for the next client.
+    while True:
+        await asyncio.sleep(1)
+        sessions.rotate_if_expired()
 
 
 @app.on_event("startup")
 async def show_pairing_code() -> None:
+    print(f"Local Agent mode: {settings.mode} (launcher bind address {settings.host}:{settings.port})", flush=True)
+    if settings.mode != PERSONAL_MODE:
+        print(
+            "WARNING: Hub mode is reachable from the network over plain HTTP. Use it on a trusted LAN only. "
+            f"Allowed origins: {', '.join(sorted(settings.allowed_origins))}",
+            flush=True,
+        )
     sweep_failures = janitor.sweep_startup()
     if sweep_failures:
         print(f"Local Agent startup sweep could not delete {len(sweep_failures)} path(s): {sweep_failures}", flush=True)
     print(f"Local Agent pairing code (valid {settings.pairing_ttl_seconds}s): {sessions.pairing_code()}", flush=True)
+    if settings.mode == HUB_MODE:
+        asyncio.create_task(rotate_expired_pairing_codes())
 
 
 @app.get("/environment/status")
@@ -78,12 +109,19 @@ def environment_status() -> dict[str, object]:
 
 
 @app.post("/environment/prepare", dependencies=[Depends(protected)])
-def environment_prepare() -> dict[str, object]:
-    status = environment.prepare()
-    if status["status"] == "READY":
-        cleanup_failures = janitor.cleanup_validation_dirs()
-        if cleanup_failures:
-            print(f"Local Agent could not delete {len(cleanup_failures)} validation dir(s): {cleanup_failures}", flush=True)
+async def environment_prepare(request: Request) -> dict[str, object]:
+    # Hub mode: only the host machine (loopback connection source) may prepare. Checked
+    # before build_lock so a rejected remote request never waits on or holds the lock.
+    if settings.mode == HUB_MODE and not is_loopback_host(request.client.host if request.client else None):
+        raise HTTPException(status_code=403, detail="Environment preparation is host-only in Hub mode.")
+    # Serialized with builds: prepare runs a validation compile and re-takes the Base
+    # manifest baseline, so it must never overlap an active build.
+    async with build_lock:
+        status = await asyncio.to_thread(environment.prepare)
+        if status["status"] == "READY":
+            cleanup_failures = janitor.cleanup_validation_dirs()
+            if cleanup_failures:
+                print(f"Local Agent could not delete {len(cleanup_failures)} validation dir(s): {cleanup_failures}", flush=True)
     return status
 
 
@@ -103,17 +141,25 @@ def list_frameworks() -> list[dict[str, object]]:
     return [{"id": "arduino", "name": "Arduino", "default": True}]
 
 
-@app.post("/build", dependencies=[Depends(protected)])
-async def create_build(body: BuildRequest) -> dict[str, str]:
+@app.post("/build")
+async def create_build(body: BuildRequest, session_id: str = Depends(protected)) -> dict[str, str]:
     if body.board != "esp32dev" or body.framework != "arduino":
         raise HTTPException(status_code=422, detail="Only esp32dev with Arduino is supported.")
     try:
         environment.assert_ready()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Admission is race-safe: there is no await between this count and the insert
+    # below, so concurrent submissions are admitted one at a time by the event loop.
+    queued = sum(1 for existing in builds.values() if existing.status == "QUEUED")
+    if queued >= settings.max_queued_builds:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Build queue is full ({queued} waiting). Try again after a build finishes.",
+        )
     build_id = uuid.uuid4().hex
     project_dir = settings.projects_dir / build_id
-    record = BuildRecord(build_id=build_id, project_dir=project_dir)
+    record = BuildRecord(build_id=build_id, project_dir=project_dir, session_id=session_id)
     builds[build_id] = record
     asyncio.create_task(run_build(record, body.source_code, body.lib_deps))
     return {"build_id": build_id, "status": record.status}
@@ -295,27 +341,29 @@ def merge_firmware(project_dir: Path, output: Path) -> subprocess.CompletedProce
     )
 
 
-def get_build(build_id: str) -> BuildRecord:
+def get_build(build_id: str, session_id: str) -> BuildRecord:
+    # Unknown builds and builds owned by another session get the identical 404,
+    # so a caller cannot learn whether a foreign build_id exists.
     record = builds.get(build_id)
-    if record is None:
+    if record is None or not secrets.compare_digest(record.session_id, session_id):
         raise HTTPException(status_code=404, detail="Build not found.")
     return record
 
 
-@app.get("/build/{build_id}/status", dependencies=[Depends(protected)])
-def build_status(build_id: str) -> dict[str, object]:
-    record = get_build(build_id)
+@app.get("/build/{build_id}/status")
+def build_status(build_id: str, session_id: str = Depends(protected)) -> dict[str, object]:
+    record = get_build(build_id, session_id)
     return {"build_id": record.build_id, "status": record.status, "duration_seconds": record.duration_seconds, "error": record.error}
 
 
-@app.get("/build/{build_id}/log", dependencies=[Depends(protected)], response_class=PlainTextResponse)
-def build_log(build_id: str) -> str:
-    return get_build(build_id).log
+@app.get("/build/{build_id}/log", response_class=PlainTextResponse)
+def build_log(build_id: str, session_id: str = Depends(protected)) -> str:
+    return get_build(build_id, session_id).log
 
 
-@app.get("/build/{build_id}/firmware/{artifact_name}", dependencies=[Depends(protected)])
-def download_firmware(build_id: str, artifact_name: str) -> FileResponse:
-    record = get_build(build_id)
+@app.get("/build/{build_id}/firmware/{artifact_name}")
+def download_firmware(build_id: str, artifact_name: str, session_id: str = Depends(protected)) -> FileResponse:
+    record = get_build(build_id, session_id)
     artifact = record.artifacts.get(artifact_name)
     if artifact is None or not artifact.is_file():
         raise HTTPException(status_code=404, detail="Firmware artifact is unavailable.")

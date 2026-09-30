@@ -1,4 +1,18 @@
-const API_BASE = 'http://127.0.0.1:8765';
+const AGENT_PORT = 8765;
+const FALLBACK_AGENT_URL = `http://127.0.0.1:${AGENT_PORT}`;
+
+// Default agent address: the host that served this page, on the agent port.
+// Personal: page at localhost/127.0.0.1 -> local agent. Hub: page loaded from the
+// hub host -> that host's agent. A manually stored agent URL still takes precedence.
+function defaultAgentUrl() {
+  const { protocol, hostname } = window.location;
+  if ((protocol === 'http:' || protocol === 'https:') && hostname) {
+    return `http://${hostname}:${AGENT_PORT}`;
+  }
+  return FALLBACK_AGENT_URL;
+}
+
+const API_BASE = defaultAgentUrl();
 const TOKEN_KEY = 'compilerio_token';
 const AGENT_URL_KEY = 'compilerio_agent_url';
 
