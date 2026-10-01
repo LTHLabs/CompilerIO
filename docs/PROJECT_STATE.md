@@ -4,17 +4,58 @@ Update when a gate finishes: replace items, do not append history. Source code b
 Labels: **CODE** = read in source, **RUNTIME** = observed in a real run. No timing/benchmark figures here (see `AGENTS.md`).
 
 ## Snapshot
-- Date: 2026-09-30. Branch `milestone-2-library-handling`, HEAD `f45ad65`.
-- Commits: `573db35` M2.1.2 → `7cd3cc5` M2.2 (DHT catalog slice) → `f45ad65` housekeeping (moved `AGENTS.md` and the PRD into
-  `docs/`, removed root `CLAUDE.md`/`AGENTS.md` and two `Eksperiment/profiling` reports, `.gitignore` now ignores `CLAUDE.md`,
-  `AGENTS.md`, `.claude`, `.vscode/`). The previous snapshot said HEAD `573db35` because it was written before, and committed inside,
-  `7cd3cc5`.
-- `CLAUDE.md` (root) and `docs/AGENTS.md` exist but are ignored/untracked; `CLAUDE.md`'s reading order still points to the old root
-  paths of `AGENTS.md` and the PRD (now `docs/AGENTS.md`, `docs/Product Requirements Document (PRD).md`).
-- Uncommitted: **M2.3 Execution Mode Foundation** — `local-agent/app/{config,main,security}.py`, new `local-agent/app/__main__.py`,
-  `web-app/{api.js,index.html}`, docs (`local-agent/README.md`, `docs/ARCHITECTURE.md`, this file) and
-  `Eksperiment/validation/m2.3-validation-2026-09-30.md`. Awaiting commit approval.
-- Active milestone: M2.3 — all gates passed (see VERIFIED). Report: `Eksperiment/validation/m2.3-validation-2026-09-30.md`.
+- Date: 2026-10-01. Branch `milestone-2-library-handling`, HEAD `ccbcc91` (M2.3 committed).
+- Uncommitted: **M2.4 Windows Support (in progress)** — new `local-agent/app/execution.py` and
+  `local-agent/tools/provision-windows-base.ps1`; modified `environment.py`, `main.py`, `config.py`, `docs/ARCHITECTURE.md`, this file;
+  report `Eksperiment/validation/m2.4-validation-2026-09-30.md`. No `.github/workflows` and no git remote exist yet.
+- M2.4 status: see "M2.4 Evidence Contract" below. Windows is implemented but not validated on any Windows host (CI or physical);
+  do not claim Windows support.
+- `CLAUDE.md` (root) and `docs/AGENTS.md` are ignored/untracked; `CLAUDE.md`'s reading order still uses old root paths.
+
+## M2.4 Evidence Contract (frozen 2026-10-01; changes need explicit approval)
+
+### Evidence vocabulary
+- **CODE** — proven by source / static inspection.
+- **RUNTIME** — proven by execution on a physical host. (The 2026-09-30 report's "MEASURED" = RUNTIME.)
+- **CI** — proven by a GitHub Actions runner. CI is never RUNTIME and never satisfies a gate that requires RUNTIME.
+- **BLOCKED** — cannot be tested yet (external dependency, missing host, or missing workflow).
+- **PASS** — all acceptance criteria of the gate are met, with the evidence type the gate requires.
+- **FAIL** — acceptance criteria not met.
+
+### Gates and current status
+| Gate | Acceptance | Status |
+|---|---|---|
+| G0 Baseline integrity | Linux Base fingerprint unchanged; protected files (`security.py`, `lifecycle.py`, `dependency_validator.py`, `web-app/`) diff-empty | PASS (RUNTIME, Linux) |
+| G1-CI Windows host capability | Windows backend runs provision → prepare → blink + DHT compile → merge on a native Windows x64 GitHub runner; artifacts per the schema below | BLOCKED (CI workflow not written) |
+| G1-FINAL Windows host capability | Same flow on the physical target Windows host | BLOCKED (no physical Windows host) |
+| G2 ExecutionBackend | Linux backend PASS (RUNTIME). Windows backend: CI runtime PASS required, target-host runtime BLOCKED until G1-FINAL. CODE evidence: `environment.py` has no direct POSIX primitives (`unshare`, `mount`, `killpg`, `SIGKILL`, `subprocess`) — they live only in `execution.py` backends | Linux PASS (RUNTIME + CODE); Windows CI BLOCKED; Windows target-host BLOCKED |
+| G3 Windows Personal E2E — **FINAL RELEASE GATE** | Real physical Windows target host + public staging Web App: pair → prepare READY → blink + DHT build → download `firmware.bin` / `wokwi-firmware.bin`; Base manifest unchanged; no `Downloading`/`Installing` in compile logs; dependency timeout kills the whole process tree. **A GitHub CI runner does NOT satisfy G3.** | BLOCKED |
+| G4 Linux regression | Existing local RUNTIME evidence **plus** an automated Linux CI regression run (reproducibility). Both required for PASS | Local RUNTIME PASS; Linux CI BLOCKED (workflow not written) → G4 not final |
+| G5 Cross-host semantic integrity | See below; **not** fingerprint equality | Linux half RUNTIME; Windows half BLOCKED |
+
+**G5 semantic integrity.** MUST match between Linux and Windows: board target (`esp32dev`), framework (Arduino), package versions,
+toolchain version, merge offsets (bootloader 0x1000, partitions 0x8000, firmware 0x10000; 0x0–0xFFF = 0xFF), artifact structure
+(`firmware.bin`, `wokwi-firmware.bin`, ELF present, merged image layout). MAY differ: absolute paths, host OS, OS-specific binaries
+(`windows_amd64` vs `linux_x86_64` toolchain), base OS metadata, and the Base listing fingerprint. Linux and Windows fingerprints
+(`stat`-based vs path+size) are never compared with each other.
+
+### CI artifact schema (Windows run, folder `m24/`)
+| File | Requirement |
+|---|---|
+| `run-metadata.json` | `commit_sha`, `runner_os`, `runner_arch`, `python_version`, `platformio_version`, `board`, `framework`, `timestamp` |
+| `gate-result.json` | per gate/criterion: `status` (PASS/FAIL/BLOCKED) **and** the list of `m24/` artifact paths that prove it. A status with no evidence path is invalid; bare `passed: true` is not accepted |
+| `provisioning-run-1.log`, `provisioning-run-2.log` | full output of provision run 1 and run 2 |
+| `provisioning-fingerprint-before.json`, `provisioning-fingerprint-after.json` | Base fingerprint after run 1 (valid) and after run 2; must be equal |
+| `build-blink.log`, `build-dht.log` | full compile logs |
+| `firmware.bin`, `firmware.elf`, `wokwi-firmware.bin`, `sha256.txt` | build outputs of the DHT build and the SHA-256 of every file in `m24/` |
+
+### Rules and limitations
+- **Provisioning idempotency** is proven inside one CI job: provision 1 → validate → provision 2 → no reinstall, no Base mutation
+  (fingerprints equal). GitHub runners are ephemeral; persistence across CI runs is not testable and not claimed.
+- **Windows isolation:** the Windows backend uses detection / fail-closed (Base manifest checked before/after; a changed Base fails
+  the operation and marks the environment not ready; unsupported host or non-`windows_amd64` Base is refused). This is **not**
+  Linux-equivalent kernel enforcement: Base writes and network use are detected, not prevented; network calls that leave no marker
+  are not detected; `taskkill /T /F` does not cover processes re-parented out of the tree. Hub mode on Windows is out of scope.
 
 ## VERIFIED
 - **M2.1.2 — RUNTIME:** dependency preparation (network ON) + offline compile (network OFF), timeout kill path, Base read-only +
@@ -55,9 +96,10 @@ Labels: **CODE** = read in source, **RUNTIME** = observed in a real run. No timi
   retention, persistent accounts/roles, Internet exposure.
 
 ## BLOCKERS
-- None for committing M2.3; commit requires explicit user approval.
+- **M2.4:** no Windows CI workflow yet (G1-CI, Windows G2, G4 Linux CI) and no physical Windows host (G1-FINAL, G3, Windows G5).
+- Committing M2.4 changes requires explicit user approval.
 
-## ACTIVE FILES (M2.3)
+## ACTIVE FILES (M2.3, committed; M2.4 files listed in Snapshot)
 - `local-agent/app/config.py` — mode, port, `max_queued_builds`, Hub startup guard, `is_loopback_host`.
 - `local-agent/app/__main__.py` (new) — launcher; bind from mode; `proxy_headers=False`.
 - `local-agent/app/main.py` — Personal loopback middleware, prepare under `build_lock` + Hub host-only check, queue admission 429,
@@ -72,8 +114,9 @@ Labels: **CODE** = read in source, **RUNTIME** = observed in a real run. No timi
   `81655045e90ad7155aa3ae1d2f178229306cee719db8d92e3f813dd7494a582c`.
 
 ## NEXT GATE (exactly one)
-**Commit M2.3** after explicit user approval: stage only the M2.3 files listed in ACTIVE FILES plus `local-agent/README.md`,
-`docs/ARCHITECTURE.md`, `docs/PROJECT_STATE.md` and the M2.3 report. Do not include ignored or unrelated files.
+**M2.4 G1-CI:** after approval of the Evidence Contract above, add a Windows x64 GitHub Actions workflow that produces the `m24/`
+artifact set (provision twice, blink + DHT build) plus a Linux regression job for G4. Then G2 Windows CI half and G5 comparison.
+G1-FINAL and G3 follow on the physical Windows target host with the public staging Web App.
 
 ## DO NOT REPEAT
 - M2.1.2/M2.2 investigations (network boundary, ownerless specs, timeout kill, compile isolation, module exports, DHT E2E,
