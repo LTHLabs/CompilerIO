@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-import signal
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -16,6 +15,7 @@ from pydantic import BaseModel, Field
 from .config import HUB_MODE, PERSONAL_MODE, Settings, is_loopback_host
 from .dependency_validator import validate_lib_deps
 from .environment import EnvironmentManager
+from .execution import ExecResult
 from .lifecycle import BuildJanitor
 from .security import SessionManager
 
@@ -236,7 +236,7 @@ async def run_build(record: BuildRecord, source_code: str, lib_deps: list[str]) 
 
             if dep_result.returncode != 0:
                 record.status = "FAILED"
-                if dep_result.returncode == -signal.SIGKILL:
+                if dep_result.timed_out:
                     record.error = f"Dependency preparation timed out after {settings.dependency_prepare_timeout}s"
                     record.log += f"\n[CompilerIO] Dependency preparation TIMEOUT (process group killed)"
                 else:
@@ -326,7 +326,7 @@ def write_project(project_dir: Path, source_code: str, lib_deps: list[str]) -> N
     (project_dir / "src" / "main.cpp").write_text(source_code, encoding="utf-8")
 
 
-def merge_firmware(project_dir: Path, output: Path) -> subprocess.CompletedProcess[str]:
+def merge_firmware(project_dir: Path, output: Path) -> ExecResult:
     build_dir = project_dir / ".pio" / "build" / "esp32dev"
     esptool = settings.base_environment / "packages" / "tool-esptoolpy" / "esptool.py"
     return environment.run_readonly_command(

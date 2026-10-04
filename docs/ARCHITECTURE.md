@@ -17,7 +17,8 @@ Web App (static ES modules, browser)
 | Module | Role |
 |---|---|
 | `main.py` | Routes, `BuildRequest`, build orchestration (`run_build`, `write_project`, `merge_firmware`), Personal loopback middleware, build ownership, queue admission |
-| `environment.py` | Base Environment validation, isolation wrappers, dependency preparation, PlatformIO execution |
+| `environment.py` | Policy: Base markers, SHA-256 manifest, READY/ERROR state, validation build, before/after integrity checks around every execution |
+| `execution.py` | Host execution backends behind `ExecutionBackend` (`check_host`, `platformio_env`, `run_offline`, `run_networked` → `ExecResult` with `timed_out`) |
 | `dependency_validator.py` | `lib_deps` validation (Registry-only) |
 | `security.py` | Origin allowlist, one-time pairing codes → per-session token (`token → session_id`, in memory) |
 | `lifecycle.py` | Build retention (FIFO), startup sweep, validation-dir cleanup |
@@ -60,10 +61,21 @@ Order in `run_build`: validate `lib_deps` → write project → **dependency pre
 
 | Phase | Isolation | Network |
 |---|---|---|
-| Dependency preparation (`_run_dependency_preparation`) | `unshare --user --map-root-user --mount`, Base bind-mounted read-only, own process group, hard timeout with `killpg(SIGKILL)` | **ON** |
-| Compile and `merge_bin` (`_run_with_readonly_base`) | same wrapper plus `--net` | **OFF** |
+| Dependency preparation (`LinuxBackend.run_networked`) | `unshare --user --map-root-user --mount`, Base bind-mounted read-only, own process group, hard timeout with `killpg(SIGKILL)` | **ON** |
+| Compile and `merge_bin` (`LinuxBackend.run_offline`) | same wrapper plus `--net` | **OFF** |
 
 Isolation needs Linux user namespaces (`unshare`, `mount`).
+
+**Host backends (M2.4).** `select_backend` picks the backend from the host OS; any other OS fails closed.
+- **Linux (`LinuxBackend`) — RUNTIME validated:** kernel-enforced isolation as in the table above (read-only bind mounts,
+  empty network namespace for offline runs, process-group kill on dependency timeout).
+- **Windows (`WindowsBackend`) — implemented, NOT validated on a real Windows host (M2.4 G1/G3 blocked):** native execution
+  without kernel isolation. The Base is exposed through NTFS directory junctions in the agent core dir, so PlatformIO's lock files
+  stay outside the Base. Base integrity is detect-and-fail-closed (the manifest checks before/after). The compile network boundary is
+  **detect-only**: an offline run fails if PlatformIO output shows `Downloading`/`Installing`. A timeout kills the process tree
+  with `taskkill /T /F`. A Base whose toolchain is not a `windows_amd64` build is refused. This is weaker than Linux: nothing
+  prevents writes or network access, they are only detected. The native Windows Base is provisioned with
+  `local-agent/tools/provision-windows-base.ps1` (pinned versions); the Linux Base is never copied.
 
 ## Dependency contract
 - `platformio.ini` is the **only** dependency manifest. `write_project` writes `lib_deps` there; dependency preparation runs

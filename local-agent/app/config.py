@@ -97,7 +97,11 @@ class Settings:
             projects_dir=(workspace_root / "runtime" / "projects").resolve(),
             # Keep the virtualenv symlink path intact. Resolving it points at the system
             # interpreter and loses the virtualenv's site-packages (including PlatformIO).
-            python_executable=workspace_root / "local-agent" / "venv" / "bin" / "python",
+            python_executable=(
+                workspace_root / "local-agent" / "venv" / "Scripts" / "python.exe"
+                if os.name == "nt"
+                else workspace_root / "local-agent" / "venv" / "bin" / "python"
+            ),
             allowed_origins=allowed_origins,
             build_retention=max(1, build_retention),
             max_queued_builds=max(1, max_queued_builds),

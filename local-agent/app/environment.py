@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import shutil
-import signal
-import subprocess
 import threading
 import uuid
 from dataclasses import dataclass
@@ -12,6 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from .config import Settings
+from .execution import ExecResult, ExecutionBackend, select_backend
 
 
 class EnvironmentState(StrEnum):
@@ -38,8 +35,10 @@ class EnvironmentManager:
         "packages/toolchain-xtensa-esp32",
     )
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, backend: ExecutionBackend | None = None) -> None:
         self.settings = settings
+        # Host-specific execution mechanics (Linux namespaces / Windows native); policy stays here.
+        self.backend = backend if backend is not None else select_backend(settings)
         self._lock = threading.Lock()
         self._state = EnvironmentState.NOT_READY
         self._reason = "Environment has not been prepared."
@@ -88,34 +87,21 @@ class EnvironmentManager:
         return current
 
     def platformio_environment(self) -> dict[str, str]:
-        env = os.environ.copy()
-        env.update(
-            {
-                "PLATFORMIO_CORE_DIR": str(self.settings.agent_core_dir),
-                # These mutable roots contain only lock/state files. Individual Base
-                # packages and platforms are bind-mounted read-only beneath them.
-                "PLATFORMIO_PACKAGES_DIR": str(self.settings.agent_core_dir / "packages"),
-                "PLATFORMIO_PLATFORMS_DIR": str(self.settings.agent_core_dir / "platforms"),
-                "PYTHONDONTWRITEBYTECODE": "1",
-            }
-        )
-        return env
+        return self.backend.platformio_env()
 
-    def run_platformio(self, project_dir: Path) -> subprocess.CompletedProcess[str]:
+    def run_platformio(self, project_dir: Path) -> ExecResult:
         before = self._assert_ready_manifest()
-        result = self._run_readonly_base(project_dir)
+        result = self._run_platformio_offline(project_dir)
         if self._manifest() != before:
             self._state = EnvironmentState.ERROR
             self._reason = "Base Environment changed during compilation."
             raise RuntimeError(self._reason)
         return result
 
-    def run_readonly_command(
-        self, command: list[str], cwd: Path
-    ) -> subprocess.CompletedProcess[str]:
-        """Run an arbitrary compiler-tool command with Base packages mounted read-only."""
+    def run_readonly_command(self, command: list[str], cwd: Path) -> ExecResult:
+        """Run an offline compiler-tool command; the Base must be unchanged afterwards."""
         before = self._assert_ready_manifest()
-        result = self._run_with_readonly_base(command, cwd)
+        result = self.backend.run_offline(command, cwd)
         if self._manifest() != before:
             self._state = EnvironmentState.ERROR
             self._reason = "Base Environment changed during compiler-tool execution."
@@ -130,8 +116,7 @@ class EnvironmentManager:
             raise RuntimeError(f"Base Environment is incomplete: missing {', '.join(missing)}")
         if not self.settings.python_executable.is_file():
             raise RuntimeError("Local Agent Python executable is missing.")
-        if shutil.which("unshare") is None or shutil.which("mount") is None:
-            raise RuntimeError("Linux read-only mount isolation is unavailable.")
+        self.backend.check_host()
 
     def _manifest(self) -> BaseManifest:
         digest = hashlib.sha256()
@@ -156,7 +141,7 @@ class EnvironmentManager:
             "void loop() { digitalWrite(2, !digitalRead(2)); delay(100); }\n",
             encoding="utf-8",
         )
-        result = self._run_readonly_base(validation_dir)
+        result = self._run_platformio_offline(validation_dir)
         log_path = validation_dir / "platformio.log"
         log_path.write_text(result.stdout + result.stderr, encoding="utf-8")
         if result.returncode != 0:
@@ -167,8 +152,8 @@ class EnvironmentManager:
         if not (validation_dir / ".pio" / "build" / "esp32dev" / "firmware.bin").is_file():
             raise RuntimeError("Validation build did not produce firmware.bin.")
 
-    def _run_readonly_base(self, project_dir: Path) -> subprocess.CompletedProcess[str]:
-        return self._run_with_readonly_base(
+    def _run_platformio_offline(self, project_dir: Path) -> ExecResult:
+        return self.backend.run_offline(
             [
                 str(self.settings.python_executable), "-m", "platformio", "run",
                 "--project-dir", str(project_dir),
@@ -176,104 +161,20 @@ class EnvironmentManager:
             project_dir,
         )
 
-    def _run_with_readonly_base(
-        self, command_tail: list[str], cwd: Path
-    ) -> subprocess.CompletedProcess[str]:
-        self._prepare_mount_targets()
-        command = [
-            # The network namespace makes package downloads impossible during build.
-            "unshare", "--user", "--map-root-user", "--mount", "--net", "sh", "-ceu",
-            (
-                "base=\"$1\"; agent=\"$2\"; shift 2; "
-                "mount --bind \"$base\" \"$base\"; mount -o remount,bind,ro \"$base\"; "
-                "for source in \"$base/packages\"/*; do "
-                "target=\"$agent/packages/${source##*/}\"; "
-                "mount --bind \"$source\" \"$target\"; mount -o remount,bind,ro \"$target\"; "
-                "done; "
-                "mount --bind \"$base/platforms/espressif32\" \"$agent/platforms/espressif32\"; "
-                "mount -o remount,bind,ro \"$agent/platforms/espressif32\"; exec \"$@\""
-            ),
-            "readonly-base", str(self.settings.base_environment), str(self.settings.agent_core_dir), *command_tail,
-        ]
-        return subprocess.run(
-            command,
-            env=self.platformio_environment(),
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-    def _prepare_mount_targets(self) -> None:
-        packages_target = self.settings.agent_core_dir / "packages"
-        platforms_target = self.settings.agent_core_dir / "platforms"
-        packages_target.mkdir(parents=True, exist_ok=True)
-        platforms_target.mkdir(parents=True, exist_ok=True)
-        for package in (self.settings.base_environment / "packages").iterdir():
-            if package.is_dir():
-                (packages_target / package.name).mkdir(exist_ok=True)
-        (platforms_target / "espressif32").mkdir(exist_ok=True)
-
-    def _run_dependency_preparation(self, project_dir: Path) -> subprocess.Popen[bytes]:
-        """Spawn pio pkg install reading lib_deps from platformio.ini with network access but Base Environment read-only."""
-        self._prepare_mount_targets()
-        command = [
-            "unshare", "--user", "--map-root-user", "--mount", "sh", "-ceu",
-            (
-                "base=\"$1\"; agent=\"$2\"; shift 2; "
-                "mount --bind \"$base\" \"$base\"; mount -o remount,bind,ro \"$base\"; "
-                "for source in \"$base/packages\"/*; do "
-                "target=\"$agent/packages/${source##*/}\"; "
-                "mount --bind \"$source\" \"$target\"; mount -o remount,bind,ro \"$target\"; "
-                "done; "
-                "mount --bind \"$base/platforms/espressif32\" \"$agent/platforms/espressif32\"; "
-                "mount -o remount,bind,ro \"$agent/platforms/espressif32\"; exec \"$@\""
-            ),
-            "readonly-base-net", str(self.settings.base_environment), str(self.settings.agent_core_dir),
-            str(self.settings.python_executable), "-m", "platformio", "pkg", "install",
-            "--project-dir", str(project_dir),
-            "--environment", "esp32dev",
-        ]
-        return subprocess.Popen(
-            command,
-            env=self.platformio_environment(),
-            cwd=project_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
-
-    def prepare_dependencies(
-        self, project_dir: Path, timeout_seconds: int
-    ) -> subprocess.CompletedProcess[str]:
-        """Install project dependencies with network access and a hard timeout."""
+    def prepare_dependencies(self, project_dir: Path, timeout_seconds: int) -> ExecResult:
+        """Install project dependencies (network allowed) with a hard timeout."""
         before = self._assert_ready_manifest()
-        process = self._run_dependency_preparation(project_dir)
-        try:
-            stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_seconds)
-            returncode = process.returncode
-        except subprocess.TimeoutExpired:
-            try:
-                pgid = os.getpgid(process.pid)
-                os.killpg(pgid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            stdout_bytes = process.stdout.read() if process.stdout else b""
-            stderr_bytes = process.stderr.read() if process.stderr else b""
-            returncode = -signal.SIGKILL
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        result = self.backend.run_networked(
+            [
+                str(self.settings.python_executable), "-m", "platformio", "pkg", "install",
+                "--project-dir", str(project_dir),
+                "--environment", "esp32dev",
+            ],
+            project_dir,
+            timeout_seconds,
+        )
         if self._manifest() != before:
             self._state = EnvironmentState.ERROR
             self._reason = "Base Environment changed during dependency preparation."
             raise RuntimeError(self._reason)
-        return subprocess.CompletedProcess(
-            args=process.args,
-            returncode=returncode,
-            stdout=stdout,
-            stderr=stderr,
-        )
+        return result
